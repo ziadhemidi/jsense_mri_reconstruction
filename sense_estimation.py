@@ -1,5 +1,9 @@
 import numpy as np
-
+import torch
+def IFFT(x):
+    return torch.fft.ifftshift(torch.fft.ifft2(torch.fft.fftshift(x, dim=(-2, -1)), dim=(-2,-1)), dim=(-2, -1))
+def FFT(x):
+    return torch.fft.fftshift(torch.fft.fft2(torch.fft.ifftshift(x, dim=(-2, -1)), dim=(-2, -1)), dim=(-2, -1))
 def normalize_basis(basis_funct):
     # Code from Melanie Gaillochet https://github.com/Minimel/MasterThesis_MRI_Reconstruction
     """
@@ -58,7 +62,7 @@ def sense_estimation_ls(Y, X, basis_funct, uspat):
     """
     num_coils, sizex, sizey = Y.shape
     num_coeffs = basis_funct.shape[0]
-    coeff_coils = np.zeros((num_coils, num_coeffs), dtype=complex)
+    coeff_coils = np.zeros((num_coils, num_coeffs), dtype=np.complex64)
 
     for i in range(num_coils):
         Y_i = Y[i].reshape(sizex*sizey)
@@ -101,13 +105,13 @@ def complex_inverse(ctensor, ntry=5) -> "ComplexTensor":
             o_real = z
             o_imag = -torch.matmul(z, x)
 
-        o = torch.complex(o_real, o_imag, device=a.real.device)
+        o = torch.complex(o_real, o_imag)
         return o.view(*in_size)
 
 def pytorch_UFT(x, uspat, sensmaps):
     # inp: [nx, ny], [nx, ny]
     # out: [nx, ny, ns]
-    return uspat[:, :].unsqueeze(0) * fftshift(torch.fft.fftn(sensmaps * x[:, :].unsqueeze(0), dim=(1, 2)), dim=(1, 2))
+    return uspat[:, :].unsqueeze(0) * FFT(sensmaps * x[:, :].unsqueeze(0))
 
 def pytorch_sense_estimation_ls(Y, X, basis_funct, uspat, device):
     """
@@ -118,24 +122,34 @@ def pytorch_sense_estimation_ls(Y, X, basis_funct, uspat, device):
     :return coefficients: Least squares coefficients for basis functions
     """
 
-    Y = torch.from_numpy(Y).to(device)
-    X = torch.from_numpy(X).to(device)
-    basis_funct = torch.from_numpy(basis_funct).to(device)
-    uspat = torch.from_numpy(uspat).to(device)
+    # Y = torch.from_numpy(Y).to(device)
+    # X = torch.from_numpy(X).to(device)
+    # basis_funct = torch.from_numpy(basis_funct).to(device)
+    # uspat = torch.from_numpy(uspat).to(device)
 
-    num_coils, sizex, sizey = y.shape
-    num_coeffs = basis_funct.shape[1]
+    # num_coils, sizex, sizey = y.shape
+    # num_coeffs = basis_funct.shape[1]
 
-    coeff_coils = torch.zeros((num_coils, num_coeffs), dtype=torch.cfloat, device=y.real.device)
-    # XA - Y = 0
+    # coeff_coils = torch.zeros((num_coils, num_coeffs), dtype=torch.cfloat, device=y.real.device)
+    # # XA - Y = 0
+    # for i in range(num_coils):
+    #     Y = y[i,:,:].reshape(sizex*sizey) 
+    #     A = pytorch_UFT(X, uspat, basis_funct[i,:,:,:]).reshape(num_coeffs, sizex*sizey) 
+    #     coeff = torch.matmul(torch.matmul(Y, torch.transpose(torch.conj(A), 0, 1)), complex_inverse(torch.matmul(A, torch.transpose(torch.conj(A), 0, 1))))
+    #     coeff_coils[i,:] = coeff
+
+    # return coeff_coils.detach().cpu().numpy()
+
+    num_coils, sizex, sizey = Y.shape
+    num_coeffs = basis_funct.shape[0]
+    coeff_coils = torch.zeros((num_coils, num_coeffs), dtype=torch.complex64, device=device)
+
     for i in range(num_coils):
-        Y = y[i,:,:].reshape(sizex*sizey) 
-        A = pytorch_UFT(X, uspat, basis_funct[i,:,:,:]).reshape(num_coeffs, sizex*sizey) 
-        coeff = torch.matmul(torch.matmul(Y, torch.transpose(torch.conj(A), 0, 1)), complex_inverse(torch.matmul(A, torch.transpose(torch.conj(A), 0, 1))))
-        coeff_coils[i,:] = coeff
+        Y_i = Y[i].reshape(sizex*sizey)
+        A_i = (uspat[i].unsqueeze(0) * FFT(basis_funct * X.unsqueeze(0))).reshape(num_coeffs, sizex*sizey).to(torch.complex64).to(device)
+        coeff_coils[i,:] = torch.matmul(torch.matmul(Y_i, torch.transpose(torch.conj(A_i), 0, 1)), complex_inverse(torch.matmul(A_i, torch.transpose(torch.conj(A_i), 0, 1))))
 
-    return coeff_coils.detach().cpu().numpy()
-
+    return coeff_coils
 
 
 
